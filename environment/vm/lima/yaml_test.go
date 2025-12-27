@@ -118,3 +118,112 @@ func Test_ingressDisabled(t *testing.T) {
 		})
 	}
 }
+
+func Test_sshAgentForwarding(t *testing.T) {
+	fsutil.FS = fsutil.FakeFS
+
+	tests := []struct {
+		name             string
+		forwardAgent     bool
+		hostSSHAuthSock  string
+		wantEnvSet       bool
+		wantPortForward  bool
+		wantProvision    bool
+		wantGuestSocket  string
+	}{
+		{
+			name:             "ForwardAgent enabled with SSH_AUTH_SOCK set",
+			forwardAgent:     true,
+			hostSSHAuthSock:  "/tmp/ssh-agent.sock",
+			wantEnvSet:       true,
+			wantPortForward:  true,
+			wantProvision:    true,
+			wantGuestSocket:  "/run/host-services/ssh-auth.sock",
+		},
+		{
+			name:             "ForwardAgent enabled without SSH_AUTH_SOCK",
+			forwardAgent:     true,
+			hostSSHAuthSock:  "",
+			wantEnvSet:       false,
+			wantPortForward:  false,
+			wantProvision:    false,
+		},
+		{
+			name:             "ForwardAgent disabled with SSH_AUTH_SOCK set",
+			forwardAgent:     false,
+			hostSSHAuthSock:  "/tmp/ssh-agent.sock",
+			wantEnvSet:       false,
+			wantPortForward:  false,
+			wantProvision:    false,
+		},
+		{
+			name:             "ForwardAgent disabled without SSH_AUTH_SOCK",
+			forwardAgent:     false,
+			hostSSHAuthSock:  "",
+			wantEnvSet:       false,
+			wantPortForward:  false,
+			wantProvision:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set or unset SSH_AUTH_SOCK environment variable
+			// t.Setenv automatically restores the original value after the test
+			if tt.hostSSHAuthSock != "" {
+				t.Setenv("SSH_AUTH_SOCK", tt.hostSSHAuthSock)
+			} else {
+				t.Setenv("SSH_AUTH_SOCK", "")
+			}
+
+			conf, err := newConf(context.Background(), config.Config{
+				ForwardAgent: tt.forwardAgent,
+			})
+			if err != nil {
+				t.Fatalf("newConf() error = %v", err)
+			}
+
+			// Check SSH_AUTH_SOCK env var in config
+			gotEnvVal, gotEnvSet := conf.Env["SSH_AUTH_SOCK"]
+			if gotEnvSet != tt.wantEnvSet {
+				t.Errorf("SSH_AUTH_SOCK env set = %v, want %v", gotEnvSet, tt.wantEnvSet)
+			}
+			if tt.wantEnvSet && gotEnvVal != tt.wantGuestSocket {
+				t.Errorf("SSH_AUTH_SOCK env value = %v, want %v", gotEnvVal, tt.wantGuestSocket)
+			}
+
+			// Check port forward for SSH agent socket
+			gotPortForward := false
+			const expectedGuestSocket = "/run/host-services/ssh-auth.sock"
+			for _, pf := range conf.PortForwards {
+				if pf.GuestSocket == expectedGuestSocket {
+					gotPortForward = true
+					if tt.wantPortForward {
+						if pf.HostSocket != tt.hostSSHAuthSock {
+							t.Errorf("SSH agent port forward HostSocket = %v, want %v", pf.HostSocket, tt.hostSSHAuthSock)
+						}
+						if !pf.Reverse {
+							t.Errorf("SSH agent port forward Reverse = %v, want true", pf.Reverse)
+						}
+					}
+					break
+				}
+			}
+			if gotPortForward != tt.wantPortForward {
+				t.Errorf("SSH agent port forward present = %v, want %v", gotPortForward, tt.wantPortForward)
+			}
+
+			// Check provision script for creating /run/host-services directory
+			gotProvision := false
+			for _, p := range conf.Provision {
+				if strings.Contains(p.Script, "mkdir -p /run/host-services") {
+					gotProvision = true
+					break
+				}
+			}
+			if gotProvision != tt.wantProvision {
+				t.Errorf("SSH agent provision script present = %v, want %v", gotProvision, tt.wantProvision)
+			}
+		})
+	}
+}

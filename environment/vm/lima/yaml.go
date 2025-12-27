@@ -83,6 +83,29 @@ func newConf(ctx context.Context, conf config.Config) (l limaconfig.Config, err 
 		l.Env = make(map[string]string)
 	}
 
+	// SSH agent forwarding: map host SSH_AUTH_SOCK to a stable path in the VM
+	if conf.ForwardAgent {
+		hostSSHAuthSock := os.Getenv("SSH_AUTH_SOCK")
+		if hostSSHAuthSock != "" {
+			const guestSSHAuthSock = "/run/host-services/ssh-auth.sock"
+			// Set SSH_AUTH_SOCK env var in the VM to the stable path
+			if _, ok := l.Env["SSH_AUTH_SOCK"]; !ok {
+				l.Env["SSH_AUTH_SOCK"] = guestSSHAuthSock
+			}
+			// Forward the host SSH agent socket to the guest (reverse: host -> guest)
+			l.PortForwards = append(l.PortForwards, limaconfig.PortForward{
+				GuestSocket: guestSSHAuthSock,
+				HostSocket:  hostSSHAuthSock,
+				Reverse:     true,
+			})
+			// Ensure the directory exists for the socket
+			l.Provision = append(l.Provision, limaconfig.Provision{
+				Mode:   limaconfig.ProvisionModeSystem,
+				Script: "mkdir -p /run/host-services",
+			})
+		}
+	}
+
 	// extra required provision commands
 	{
 		// fix inotify

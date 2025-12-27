@@ -109,6 +109,7 @@ type PortForward struct {
 	HostSocket        string `yaml:"hostSocket,omitempty" json:"hostSocket,omitempty"`
 	Proto             Proto  `yaml:"proto,omitempty" json:"proto,omitempty"`
 	Ignore            bool   `yaml:"ignore,omitempty" json:"ignore,omitempty"`
+	Reverse           bool   `yaml:"reverse,omitempty" json:"reverse,omitempty"`
 }
 
 type HostResolver struct {
